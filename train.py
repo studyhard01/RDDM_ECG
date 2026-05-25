@@ -157,7 +157,7 @@ if __name__ == "__main__":
 
     config = {
         "n_epoch": 181,
-        "batch_size": 64,
+        "batch_size": 32,
         "nT":10,
         "device": "cuda",
         "attention_heads": 8,
@@ -165,11 +165,11 @@ if __name__ == "__main__":
         "alpha1": 100,
         "alpha2": 1,
         "alphafft" : 0.1 , 
-        "PATH": "/cap/RDDM-main/hsh/ECG2ECG_FINAL/LEAD1TO4/withfft/",
-        "with_fftloss" : True ,
+        "PATH": "/tf/revision/model/none/1to4",
+        "with_fftloss" : False ,
         "sampling_rate" : 128 ,
         "cutoff_freq" : 30.0  ,
-        "with_fftcond" : True
+        "with_fftcond" : False
     }
 
     train_rddm(config)
