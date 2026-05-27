@@ -1,9 +1,7 @@
-import torch
+from pathlib import Path
 import numpy as np
-from tqdm import tqdm
 import neurokit2 as nk
-import sklearn.preprocessing as skp
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 class ECGDataset(Dataset):
     def __init__(self, ecgall_data, ecgcond_data):
@@ -40,7 +38,9 @@ class ECGDataset(Dataset):
 def get_datasets(
     DATA_PATH = "/tf/revision/data/",
     datasets=["PTBXL"],
-    window_size=5
+    window_size=5,
+    input_lead=1,
+    target_lead=4
     ):
 
     ecgall_train_list = []
@@ -50,12 +50,13 @@ def get_datasets(
     
     
     for dataset in datasets:
+        dataset_path = Path(DATA_PATH) / dataset
         
-        ecgall_train = np.load(DATA_PATH + dataset + f"/lead4_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        ecgcond_train = np.load(DATA_PATH + dataset + f"/lead1_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgall_train = np.load(dataset_path / f"lead{target_lead}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgcond_train = np.load(dataset_path / f"lead{input_lead}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
         
-        ecgall_test = np.load(DATA_PATH + dataset + f"/lead4_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        ecgcond_test = np.load(DATA_PATH + dataset + f"/lead1_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgall_test = np.load(dataset_path / f"lead{target_lead}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgcond_test = np.load(dataset_path / f"lead{input_lead}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
 
         ecgall_train_list.append(ecgall_train)
         ecgcond_train_list.append(ecgcond_train)

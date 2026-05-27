@@ -57,7 +57,7 @@ Lead 번호는 일반 12-lead ECG 순서를 따르는 것으로 사용합니다.
 | `lead11` | V5 |
 | `lead12` | V6 |
 
-현재 `data.py`는 조건 lead를 `lead1`, target lead를 `lead4`로 읽습니다. 다른 target lead를 학습하려면 `data.py`의 `lead4_train.npy`, `lead4_test.npy` 부분을 원하는 target lead 파일명으로 바꾸고, `train.py`의 저장 경로와 wandb run id도 같이 구분해야 합니다.
+`data.py`는 조건 lead와 target lead를 인자로 받습니다. `train.py` 실행 시 `--input-lead`, `--target-leads`로 원하는 lead를 지정하면 됩니다.
 
 ## File Guide
 
@@ -66,8 +66,8 @@ Lead 번호는 일반 12-lead ECG 순서를 따르는 것으로 사용합니다.
 | `README.md` | 프로젝트 구조, 파일 역할, 실험 실행 순서를 설명합니다. |
 | `LICENSE` | 원본/프로젝트 라이선스 파일입니다. |
 | `Region-Disentangled Diffusion과 주파수 정보 융합.pdf` | 실험 배경과 최종 실험 구성, 생성/분류 결과를 설명하는 문서입니다. |
-| `data.py` | 생성 모델 학습/평가용 PTB-XL lead pair dataset을 만듭니다. 기본은 `lead1 -> lead4`입니다. target lead에서 R-peak를 찾고, peak 주변 32 sample을 ROI mask로 만듭니다. 현재 버전은 로드된 ECG에 `ecg_clean`을 적용하지 않습니다. |
-| `train.py` | RDDM 또는 FFT 조건/FFT loss 변형 모델을 학습합니다. `data.py`의 train dataset을 사용하고 checkpoint를 저장합니다. |
+| `data.py` | 생성 모델 학습/평가용 PTB-XL lead pair dataset을 만듭니다. `input_lead`, `target_lead`에 맞는 `lead{n}_train.npy`, `lead{n}_test.npy`를 읽습니다. target lead에서 R-peak를 찾고, peak 주변 32 sample을 ROI mask로 만듭니다. 현재 버전은 로드된 ECG에 `ecg_clean`을 적용하지 않습니다. |
+| `train.py` | RDDM 또는 FFT 조건/FFT loss 변형 모델을 학습합니다. CLI 인자로 데이터 경로, 저장 루트, 입력 lead, 복수 target lead, 학습 hyperparameter를 받으며, target lead별 checkpoint directory를 자동 생성합니다. |
 | `diffusion.py` | DDPM/RDDM forward process, reverse sampling, pretrained checkpoint loader를 정의합니다. `RDDM`, `RDDMfft`, `Naive` 타입 로딩을 담당합니다. |
 | `model.py` | 모델 정의 모음입니다. RDDM용 1D U-Net, cross-attention U-Net, condition network, FFT condition network, ST-MEM 기반 분류 보조 모델이 들어 있습니다. |
 | `metrics.py` | FFT loss, FD, RMSE, heart-rate MAE 계산에 필요한 지표 함수를 제공합니다. |
@@ -99,7 +99,7 @@ dataset_train, dataset_test = get_datasets(
 
 ### 2. Target lead 선택
 
-현재 기본 코드는 `lead1 -> lead4(aVR)`입니다.
+현재 기본 실행은 `lead1 -> lead4(aVR)`입니다. 복수 target lead는 한 번의 `python train.py` 실행에서 순차적으로 학습할 수 있습니다.
 
 PDF 실험의 6개 주요 target lead를 재현하려면 target별로 개별 모델을 학습합니다.
 
@@ -112,35 +112,20 @@ PDF 실험의 6개 주요 target lead를 재현하려면 target별로 개별 모
 | V5 generation | `lead1` | `lead11` |
 | V6 generation | `lead1` | `lead12` |
 
-각 target마다 `data.py`의 target filename과 `train.py`의 `PATH`, wandb `id`를 target lead에 맞게 바꿔서 실행합니다. 예를 들어 Lead II 모델은 `lead4_train.npy`를 `lead2_train.npy`로, `lead4_test.npy`를 `lead2_test.npy`로 바꿉니다.
+각 target마다 코드를 직접 수정할 필요는 없습니다. 예를 들어 Lead II, aVR, aVL, aVF, V5, V6 모델을 한 번에 학습하려면 `--target-leads 2 4 5 6 11 12`를 사용합니다.
 
 ### 3. RDDM baseline 학습
 
-`train.py`의 config를 baseline RDDM에 맞춥니다.
-
-```python
-config = {
-    "n_epoch": 181,
-    "batch_size": 32,
-    "nT": 10,
-    "device": "cuda",
-    "attention_heads": 8,
-    "cond_mask": 0.0,
-    "alpha1": 100,
-    "alpha2": 1,
-    "alphafft": 0.1,
-    "PATH": "/tf/revision/model/none/1to4",
-    "with_fftloss": False,
-    "sampling_rate": 128,
-    "cutoff_freq": 30.0,
-    "with_fftcond": False,
-}
-```
+`train.py`의 기본 CLI 값은 baseline RDDM에 맞춰져 있습니다.
 
 실행:
 
 ```bash
-python train.py
+python train.py \
+  --data-path /tf/revision/data/ \
+  --model-root /tf/revision/model/ \
+  --input-lead 1 \
+  --target-leads 2 4 5 6 11 12
 ```
 
 학습은 다음 세 모델을 저장합니다.
@@ -153,15 +138,33 @@ ConditionNet2_epoch{epoch}.pth
 
 현재 저장 주기는 `i % 30 == 0`입니다.
 
+저장 경로는 `--model-root`를 기준으로 자동 생성됩니다.
+
+```text
+/tf/revision/model/
+└── none/
+    ├── 1to2/
+    ├── 1to4/
+    ├── 1to5/
+    ├── 1to6/
+    ├── 1to11/
+    └── 1to12/
+```
+
 ### 4. FFT loss / FFT condition 모델 학습
 
 PDF의 제안 방법은 FFT loss를 추가해 생성 신호와 실제 신호의 주파수 magnitude 차이를 줄이는 방식입니다.
 
-`train.py`에서 다음 값을 켭니다.
+`train.py`에서 다음 옵션을 켭니다.
 
-```python
-"with_fftloss": True,
-"with_fftcond": True,
+```bash
+python train.py \
+  --data-path /tf/revision/data/ \
+  --model-root /tf/revision/model/ \
+  --input-lead 1 \
+  --target-leads 2 4 5 6 11 12 \
+  --with-fftloss \
+  --with-fftcond
 ```
 
 loss는 코드 기준으로 다음 가중합입니다.
@@ -171,6 +174,39 @@ loss = 100 * DDPM_loss + 1 * Region_loss + 0.1 * FFT_loss
 ```
 
 `with_fftcond=True`이면 `ConditionNetWithFFT`를 사용해 time-domain 조건과 rFFT magnitude 조건을 함께 구성합니다.
+
+FFT loss를 선택하면 저장 경로는 `withfftloss` 아래에 만들어집니다.
+
+```text
+/tf/revision/model/
+└── withfftloss/
+    ├── 1to2/
+    ├── 1to4/
+    ├── 1to5/
+    ├── 1to6/
+    ├── 1to11/
+    └── 1to12/
+```
+
+주요 실행 인자:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--data-path` | `/tf/revision/data/` | Dataset root path |
+| `--datasets` | `PTBXL` | Dataset folder names under data root |
+| `--model-root` | `/tf/revision/model/` | Checkpoint root path |
+| `--input-lead` | `1` | Condition lead number |
+| `--target-leads` | `4` | One or more target lead numbers |
+| `--window-size` | `5` | Training window size in seconds |
+| `--epochs` | `121` | Number of training epochs |
+| `--batch-size` | `32` | Training batch size |
+| `--num-workers` | `128` | DataLoader worker count |
+| `--nT` | `10` | Diffusion denoising steps |
+| `--with-fftloss` | off | Add FFT loss and save under `withfftloss` |
+| `--with-fftcond` | off | Use FFT-aware condition networks |
+| `--save-every` | `30` | Checkpoint save interval |
+| `--resume-epoch` | unset | Resume each selected lead from that epoch |
+| `--disable-wandb` | off | Disable wandb logging |
 
 ### 5. 생성 성능 평가
 
@@ -189,7 +225,7 @@ sbatch std_eval.sh
 주의할 점:
 
 - `diffusion.py`의 `load_pretrained_DPM()`은 현재 RDDM/RDDMfft에서 `RDDM_epoch500.pth`, `ConditionNet1_epoch500.pth`, `ConditionNet2_epoch500.pth`를 찾습니다.
-- `train.py` 기본 config는 `n_epoch=181`이고 저장 주기는 30 epoch라서 기본 실행만으로는 `epoch500` checkpoint가 만들어지지 않습니다.
+- `train.py` 기본 config는 `n_epoch=121`이고 저장 주기는 30 epoch라서 기본 실행만으로는 `epoch500` checkpoint가 만들어지지 않습니다.
 - 평가 전에 `diffusion.py`의 checkpoint epoch 또는 `train.py`의 epoch/save 정책을 실제 파일에 맞춰야 합니다.
 - FFT condition 모델을 평가하려면 `std_eval.py`의 `type="RDDM"` 호출을 `type="RDDMfft"`로 바꿔야 합니다.
 
@@ -268,7 +304,7 @@ batch size: 16
 
 ## Current Defaults And Things To Check
 
-- `data.py`는 현재 `lead1 -> lead4`로 고정되어 있습니다. 여러 lead 실험은 target filename을 바꿔 반복 실행해야 합니다.
+- `train.py`는 `--target-leads`에 지정한 lead를 순차적으로 학습합니다.
 - `data.py`는 raw ECG를 그대로 사용하고, ROI mask 생성을 위해 `nk.ecg_peaks()`만 호출합니다.
 - `data_withdiffusion.py` 내부 변수명은 `ppg`로 남아 있지만, 이 프로젝트에서는 실제로 Lead I ECG 조건 신호를 의미합니다.
 - `train.py` 기본값은 FFT loss와 FFT condition이 꺼져 있습니다.
@@ -279,10 +315,9 @@ batch size: 16
 ## Suggested Reproduction Order
 
 1. PTB-XL `.npy` 파일을 준비합니다.
-2. `data.py`에서 target lead를 정합니다.
-3. `train.py`에서 baseline RDDM config를 설정하고 학습합니다.
-4. `train.py`에서 FFT loss/FFT condition config를 설정하고 같은 target lead를 다시 학습합니다.
-5. target lead마다 2-4단계를 반복합니다.
+2. `python train.py --target-leads ...`로 baseline RDDM을 학습합니다.
+3. `python train.py --target-leads ... --with-fftloss --with-fftcond`로 FFT loss/FFT condition 모델을 학습합니다.
+4. 필요한 target lead를 `--target-leads`에 모두 넣어 반복 실행 없이 순차 학습합니다.
 6. `diffusion.py`와 `std_eval.py`의 checkpoint epoch/type/path를 실제 파일에 맞춥니다.
 7. `std_eval.py`로 RMSE, FD, MAE_HR_ECG를 계산합니다.
 8. `RDDM_visualization.ipynb`로 생성 파형을 확인합니다.
