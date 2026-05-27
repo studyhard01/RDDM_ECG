@@ -6,10 +6,9 @@ import sklearn.preprocessing as skp
 from torch.utils.data import Dataset, DataLoader
 
 class ECGDataset(Dataset):
-    def __init__(self, ecgall_data, ecgcond_data, with_ecgclean):
+    def __init__(self, ecgall_data, ecgcond_data):
         self.ecgall_data = ecgall_data
         self.ecgcond_data = ecgcond_data
-        self.with_ecgclean = with_ecgclean
 
     def __getitem__(self, index):
 
@@ -18,8 +17,8 @@ class ECGDataset(Dataset):
         
         window_size = ecgall.shape[-1]
 
-        ecgall = nk.ecg_clean(ecgall.reshape(window_size), sampling_rate=128, method="pantompkins1985")
-        ecgcond = nk.ecg_clean(ecgcond.reshape(window_size), sampling_rate=128, method="pantompkins1985")
+        ecgall = ecgall.reshape(window_size)
+        ecgcond = ecgcond.reshape(window_size)
 
         _, info = nk.ecg_peaks(ecgall, sampling_rate=128, method="pantompkins1985", correct_artifacts=True, show=False)
 
@@ -41,8 +40,7 @@ class ECGDataset(Dataset):
 def get_datasets(
     DATA_PATH = "/tf/revision/data/",
     datasets=["PTBXL"],
-    window_size=5,
-    with_ecgclean=True
+    window_size=5
     ):
 
     ecgall_train_list = []
@@ -72,13 +70,11 @@ def get_datasets(
 
     dataset_train = ECGDataset(
         ecgall_train,
-        ecgcond_train,
-        with_ecgclean=with_ecgclean
+        ecgcond_train
     )
     dataset_test = ECGDataset(
         ecgall_test,
-        ecgcond_test,
-        with_ecgclean=with_ecgclean
+        ecgcond_test
     )
 
     return dataset_train, dataset_test
