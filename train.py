@@ -147,7 +147,7 @@ def train_rddm(config, resume_epoch=None):
 
         scheduler.step()
 
-        if i % 30 == 0:
+        if i % 50 == 0:
             torch.save(rddm.module.state_dict(), f"{PATH}/RDDM_epoch{i}.pth")
             torch.save(Conditioning_network1.module.state_dict(), f"{PATH}/ConditionNet1_epoch{i}.pth")
             torch.save(Conditioning_network2.module.state_dict(), f"{PATH}/ConditionNet2_epoch{i}.pth")
@@ -156,7 +156,7 @@ def train_rddm(config, resume_epoch=None):
 if __name__ == "__main__":
 
     config = {
-        "n_epoch": 181,
+        "n_epoch": 300,
         "batch_size": 32,
         "nT":10,
         "device": "cuda",
