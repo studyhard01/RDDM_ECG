@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
+from pathlib import Path
 from statistics import mean
 from math import floor
 from functools import reduce
@@ -194,9 +195,12 @@ def freeze_model(model):
     
     return model
 
-def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
+def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda", checkpoint_epoch=None):
+    checkpoint_path = Path(PATH)
 
     if type == "RDDM" or type == "RDDMfft" :
+        if checkpoint_epoch is None:
+            checkpoint_epoch = 120
 
         dpm = RDDM(
             eps_model=DiffusionUNetCrossAttention(512, 1, device),
@@ -205,29 +209,31 @@ def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
             n_T=nT
         ).to(device)
         
-        dpm.load_state_dict(torch.load(PATH + "RDDM_epoch120.pth"))
+        dpm.load_state_dict(torch.load(checkpoint_path / f"RDDM_epoch{checkpoint_epoch}.pth", map_location=device))
 
         dpm = freeze_model(dpm)
 
         if type == "RDDM" :
             Conditioning_network1 = ConditionNet().to(device)
         elif type == "RDDMfft" :
-            Conditioning_network1 = ConditionNetWithFFT().to(device)
+            Conditioning_network1 = ConditionNetWithFFT(device=device).to(device)
             
-        Conditioning_network1.load_state_dict(torch.load(PATH + "ConditionNet1_epoch120.pth"))
+        Conditioning_network1.load_state_dict(torch.load(checkpoint_path / f"ConditionNet1_epoch{checkpoint_epoch}.pth", map_location=device))
         Conditioning_network1 = freeze_model(Conditioning_network1)
 
         if type == "RDDM" :
             Conditioning_network2 = ConditionNet().to(device)
         elif type == "RDDMfft" :
-            Conditioning_network2 = ConditionNetWithFFT().to(device)
+            Conditioning_network2 = ConditionNetWithFFT(device=device).to(device)
             
-        Conditioning_network2.load_state_dict(torch.load(PATH + "ConditionNet2_epoch120.pth"))
+        Conditioning_network2.load_state_dict(torch.load(checkpoint_path / f"ConditionNet2_epoch{checkpoint_epoch}.pth", map_location=device))
         Conditioning_network2 = freeze_model(Conditioning_network2)
  
         return dpm, Conditioning_network1, Conditioning_network2
     
     else: # Naive DDPM
+        if checkpoint_epoch is None:
+            checkpoint_epoch = 120
 
         dpm = NaiveDDPM(
             eps_model=DiffusionUNetCrossAttention(512, 1, device),
@@ -235,12 +241,11 @@ def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
             n_T=nT
         ).to(device)
 
-
-        dpm.load_state_dict(torch.load(PATH + f"RDDM_epoch120.pth"))
+        dpm.load_state_dict(torch.load(checkpoint_path / f"RDDM_epoch{checkpoint_epoch}.pth", map_location=device))
         dpm = freeze_model(dpm)
 
         Conditioning_network = ConditionNet().to(device)
-        Conditioning_network.load_state_dict(torch.load(PATH + f"ConditionNet1_epoch120.pth"))
+        Conditioning_network.load_state_dict(torch.load(checkpoint_path / f"ConditionNet1_epoch{checkpoint_epoch}.pth", map_location=device))
         Conditioning_network = freeze_model(Conditioning_network)
         
         return dpm, Conditioning_network, None
