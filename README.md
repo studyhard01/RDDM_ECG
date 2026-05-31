@@ -167,11 +167,13 @@ python train.py \
   --with-fftcond
 ```
 
-loss는 코드 기준으로 다음 가중합입니다.
+loss는 PDF의 실험 세팅에 맞춰 다음 가중합을 사용합니다.
 
 ```text
-loss = 100 * DDPM_loss + 1 * Region_loss + 0.1 * FFT_loss
+loss = 1 * DDPM_loss + 100 * Region_loss + 0.1 * FFT_loss
 ```
+
+PDF 본문에는 손실 함수 가중치가 `region loss`, `ddpm loss`, `FFT loss` 순서로 각각 `100`, `1`, `0.1`이라고 설명되어 있습니다. 코드에서는 `alpha1`이 DDPM loss, `alpha2`가 Region loss에 곱해지므로 기본값은 `alpha1=1`, `alpha2=100`, `alphafft=0.1`입니다.
 
 `with_fftcond=True`이면 `ConditionNetWithFFT`를 사용해 time-domain 조건과 rFFT magnitude 조건을 함께 구성합니다.
 
