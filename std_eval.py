@@ -276,7 +276,54 @@ def eval_diffusion(
 
         return tracked_metrics
 
+def summarize_repeated_metrics(run_metrics):
+    """
+    run_metrics: list[dict]
+    각 run에서 나온 metric dict 리스트를 받아서
+    숫자형 metric에 대해 mean/std를 계산한다.
+    """
+    if not run_metrics:
+        raise ValueError("run_metrics is empty.")
 
+    summary = {}
+
+    # 숫자형 metric만 평균/표준편차 계산
+    metric_keys = []
+    for key, value in run_metrics[0].items():
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            # 반복 실험 요약에서 의미 없는 식별자는 제외
+            if key in ["input_lead", "target_lead", "checkpoint_epoch", "DTW_sample_count"]:
+                continue
+            metric_keys.append(key)
+
+    for key in metric_keys:
+        values = np.array(
+            [metrics[key] for metrics in run_metrics if key in metrics and not np.isnan(metrics[key])],
+            dtype=np.float64,
+        )
+
+        if values.size == 0:
+            summary[f"{key}_mean"] = float("nan")
+            summary[f"{key}_std"] = float("nan")
+        else:
+            summary[f"{key}_mean"] = float(np.mean(values))
+            summary[f"{key}_std"] = float(np.std(values, ddof=1)) if values.size > 1 else 0.0
+
+    # 식별 정보 보존
+    summary.update(
+        {
+            "input_lead": run_metrics[0]["input_lead"],
+            "target_lead": run_metrics[0]["target_lead"],
+            "checkpoint_epoch": run_metrics[0]["checkpoint_epoch"],
+            "checkpoint_path": run_metrics[0]["checkpoint_path"],
+            "model_type": run_metrics[0]["model_type"],
+            "num_runs": len(run_metrics),
+        }
+    )
+
+    return summary
+
+    
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate trained RDDM ECG lead translation models.")
     parser.add_argument("--data-path", default="/tf/revision/data/", help="Root directory containing dataset folders.")
@@ -296,6 +343,8 @@ def parse_args():
     parser.add_argument("--dtw-samples", type=int, default=100, help="Number of generated samples used for DTW. Use 0 for all samples.")
     parser.add_argument("--dtw-stride", type=int, default=1, help="Stride applied before DTW to speed up evaluation.")
     parser.add_argument("--json", action="store_true", help="Print metrics as JSON.")
+    parser.add_argument("--num-runs", type=int, default=1, help="Number of repeated evaluation runs.")
+    parser.add_argument("--seed", type=int, default=31, help="Base random seed for repeated evaluation.")
     return parser.parse_args()
 
 
@@ -307,48 +356,95 @@ def validate_args(args):
         raise ValueError("window_size must be greater than 0.")
     if args.dtw_stride <= 0:
         raise ValueError("dtw_stride must be greater than 0.")
+    if args.num_runs <= 0:
+        raise ValueError("num_runs must be greater than 0.")
 
 
 if __name__ == "__main__":
     args = parse_args()
     validate_args(args)
+
     dtw_samples = None if args.dtw_samples == 0 else args.dtw_samples
-    all_metrics = []
+
+    all_results = []
+    all_summaries = []
 
     for target_lead in args.target_leads:
-        model_path = build_model_path(args.model_base, args.with_fftloss, args.input_lead, target_lead)
+        model_path = build_model_path(
+            args.model_base,
+            args.with_fftloss,
+            args.input_lead,
+            target_lead,
+        )
+
         print(f"\nEvaluating lead{args.input_lead} -> lead{target_lead}")
         print(f"Loading checkpoints from: {model_path}")
+        print(f"Repeated runs: {args.num_runs}")
 
-        tracked_metrics = eval_diffusion(
-            window_size=args.window_size,
-            EVAL_DATASETS=args.datasets,
-            DATA_PATH=args.data_path,
-            nT=args.nT,
-            batch_size=args.batch_size,
-            PATH=model_path,
-            device=args.device,
-            input_lead=args.input_lead,
-            target_lead=target_lead,
-            checkpoint_epoch=args.checkpoint_epoch,
-            with_fftcond=args.with_fftcond,
-            num_workers=args.num_workers,
-            max_batches=args.max_batches,
-            dtw_samples=dtw_samples,
-            dtw_stride=args.dtw_stride,
-        )
-        all_metrics.append(tracked_metrics)
+        run_metrics = []
+
+        for run_idx in range(args.num_runs):
+            current_seed = args.seed + run_idx
+            set_deterministic(current_seed)
+
+            print(f"\nRun {run_idx + 1}/{args.num_runs} | seed={current_seed}")
+
+            tracked_metrics = eval_diffusion(
+                window_size=args.window_size,
+                EVAL_DATASETS=args.datasets,
+                DATA_PATH=args.data_path,
+                nT=args.nT,
+                batch_size=args.batch_size,
+                PATH=model_path,
+                device=args.device,
+                input_lead=args.input_lead,
+                target_lead=target_lead,
+                checkpoint_epoch=args.checkpoint_epoch,
+                with_fftcond=args.with_fftcond,
+                num_workers=args.num_workers,
+                max_batches=args.max_batches,
+                dtw_samples=dtw_samples,
+                dtw_stride=args.dtw_stride,
+            )
+
+            tracked_metrics["run_idx"] = run_idx + 1
+            tracked_metrics["seed"] = current_seed
+
+            run_metrics.append(tracked_metrics)
+            all_results.append(tracked_metrics)
+
+            if not args.json:
+                print(
+                    f"Run {run_idx + 1}: "
+                    f"RMSE={tracked_metrics['RMSE_score']}, "
+                    f"FD={tracked_metrics['FD']}, "
+                    f"MAE_HR_ECG={tracked_metrics['MAE_HR_ECG']}, "
+                    f"Corr={tracked_metrics['Correlation_coefficient']}, "
+                    f"DTW={tracked_metrics['DTW']}, "
+                    f"SpectralSim={tracked_metrics['Spectral_similarity']}"
+                )
+
+        summary = summarize_repeated_metrics(run_metrics)
+        all_summaries.append(summary)
 
         if not args.json:
+            print(f"\nSummary | lead{args.input_lead}->lead{target_lead}")
             print(
-                f"lead{args.input_lead}->lead{target_lead}: "
-                f"RMSE={tracked_metrics['RMSE_score']}, "
-                f"FD={tracked_metrics['FD']}, "
-                f"MAE_HR_ECG={tracked_metrics['MAE_HR_ECG']}, "
-                f"Corr={tracked_metrics['Correlation_coefficient']}, "
-                f"DTW={tracked_metrics['DTW']}, "
-                f"SpectralSim={tracked_metrics['Spectral_similarity']}"
+                f"RMSE={summary['RMSE_score_mean']:.6f} ± {summary['RMSE_score_std']:.6f}, "
+                f"FD={summary['FD_mean']:.6f} ± {summary['FD_std']:.6f}, "
+                f"MAE_HR_ECG={summary['MAE_HR_ECG_mean']:.6f} ± {summary['MAE_HR_ECG_std']:.6f}, "
+                f"Corr={summary['Correlation_coefficient_mean']:.6f} ± {summary['Correlation_coefficient_std']:.6f}, "
+                f"DTW={summary['DTW_mean']:.6f} ± {summary['DTW_std']:.6f}, "
+                f"SpectralSim={summary['Spectral_similarity_mean']:.6f} ± {summary['Spectral_similarity_std']:.6f}"
             )
 
     if args.json:
-        print(json.dumps({"results": all_metrics}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "results": all_results,
+                    "summary": all_summaries,
+                },
+                indent=2,
+            )
+        )
