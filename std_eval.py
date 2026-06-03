@@ -34,7 +34,7 @@ def set_deterministic(seed):
         )
 
 
-set_deterministic(31)
+# set_deterministic(31)
 
 
 def build_model_path(model_base, with_fftloss, input_lead, target_lead):
