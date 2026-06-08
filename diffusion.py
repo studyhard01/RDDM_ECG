@@ -7,7 +7,7 @@ from functools import reduce
 from typing import Dict, Tuple
 import neurokit2 as nk
 import torch.nn.functional as F
-from model import DiffusionUNetCrossAttention, ConditionNet
+from model import DiffusionUNetCrossAttention, ConditionNet, ConditionNetWithFFT
 
 def ddpm_schedule(beta1: float, beta2: float, T: int) -> Dict[str, torch.Tensor]:
     """
@@ -196,7 +196,7 @@ def freeze_model(model):
 
 def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
 
-    if type == "RDDM":
+    if type == "RDDM" or type == "RDDMfft" :
 
         dpm = RDDM(
             eps_model=DiffusionUNetCrossAttention(512, 1, device),
@@ -205,16 +205,24 @@ def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
             n_T=nT
         ).to(device)
         
-        dpm.load_state_dict(torch.load(PATH + "RDDM_epoch160.pth"))
+        dpm.load_state_dict(torch.load(PATH + "RDDM_epoch500.pth"))
 
         dpm = freeze_model(dpm)
 
-        Conditioning_network1 = ConditionNet().to(device)
-        Conditioning_network1.load_state_dict(torch.load(PATH + "ConditionNet1_epoch160.pth"))
+        if type == "RDDM" :
+            Conditioning_network1 = ConditionNet().to(device)
+        elif type == "RDDMfft" :
+            Conditioning_network1 = ConditionNetWithFFT().to(device)
+            
+        Conditioning_network1.load_state_dict(torch.load(PATH + "ConditionNet1_epoch500.pth"))
         Conditioning_network1 = freeze_model(Conditioning_network1)
 
-        Conditioning_network2 = ConditionNet().to(device)
-        Conditioning_network2.load_state_dict(torch.load(PATH + "ConditionNet2_epoch160.pth"))
+        if type == "RDDM" :
+            Conditioning_network2 = ConditionNet().to(device)
+        elif type == "RDDMfft" :
+            Conditioning_network2 = ConditionNetWithFFT().to(device)
+            
+        Conditioning_network2.load_state_dict(torch.load(PATH + "ConditionNet2_epoch500.pth"))
         Conditioning_network2 = freeze_model(Conditioning_network2)
  
         return dpm, Conditioning_network1, Conditioning_network2
@@ -227,11 +235,12 @@ def load_pretrained_DPM(PATH, nT, type="RDDM", device="cuda"):
             n_T=nT
         ).to(device)
 
-        dpm.load_state_dict(torch.load(PATH + f"ddpm_main_network_{nT}.pth"))
+
+        dpm.load_state_dict(torch.load(PATH + f"RDDM_epoch90.pth"))
         dpm = freeze_model(dpm)
 
         Conditioning_network = ConditionNet().to(device)
-        Conditioning_network.load_state_dict(torch.load(PATH + f"ddpm_condition_encoder_{nT}.pth"))
+        Conditioning_network.load_state_dict(torch.load(PATH + f"ConditionNet1_epoch90.pth"))
         Conditioning_network = freeze_model(Conditioning_network)
         
         return dpm, Conditioning_network, None

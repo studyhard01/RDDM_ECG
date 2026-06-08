@@ -49,14 +49,15 @@ def get_datasets(
     ecgcond_train_list = []
     ecgall_test_list = []
     ecgcond_test_list = []
-    
+    leadnum = 2
+    print(leadnum)
     
     for dataset in datasets:
         
-        ecgall_train = np.load(DATA_PATH + dataset + f"/lead4_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgall_train = np.load(DATA_PATH + dataset + f"/lead{leadnum}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
         ecgcond_train = np.load(DATA_PATH + dataset + f"/lead1_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
         
-        ecgall_test = np.load(DATA_PATH + dataset + f"/lead4_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ecgall_test = np.load(DATA_PATH + dataset + f"/lead{leadnum}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
         ecgcond_test = np.load(DATA_PATH + dataset + f"/lead1_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
 
         ecgall_train_list.append(ecgall_train)

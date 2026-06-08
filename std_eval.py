@@ -9,7 +9,7 @@ import numpy as np
 from diffusion import load_pretrained_DPM
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
-from data import get_datasets
+from data_eval import get_datasets
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
@@ -42,9 +42,10 @@ def pad_along_axis(array: np.ndarray, target_length: int, axis: int = 0) -> np.n
     npad[axis] = (0, pad_size)
 
     return np.pad(array, pad_width=npad, mode='constant', constant_values=0)
+# /tf/hsh/RDDM_ECG/saves/exp_base/
+def eval_diffusion(window_size, EVAL_DATASETS, nT=10, batch_size=16, PATH="/tf/hsh/RDDM_ECG/saves/exp_base/", device="cuda", check_sig = False):
 
-def eval_diffusion(window_size, EVAL_DATASETS, nT=10, batch_size=32, PATH="/cap/RDDM-main/hsh/ECG2ECG_FINAL/LEAD1TO12/", device="cuda", check_sig = False):
-
+    print(PATH)
     _, dataset_test = get_datasets(datasets=EVAL_DATASETS, window_size=window_size)
 
     testloader = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=64)
@@ -123,7 +124,7 @@ def eval_diffusion(window_size, EVAL_DATASETS, nT=10, batch_size=32, PATH="/cap/
         return tracked_metrics
 
 
-def eval_diffusion_naive(window_size, EVAL_DATASETS, nT=10, batch_size=32, PATH="/cap/jhk/RDDM/NaiveDDPM/ECG2ECG12/", device="cuda"):
+def eval_diffusion_naive(window_size, EVAL_DATASETS, nT=10, batch_size=32, PATH="/tf/hsh/SW_ECG/RDDM_ECG/finalmodel/naive/1to12/", device="cuda"):
 
     _, dataset_test = get_datasets(datasets=EVAL_DATASETS, window_size=window_size)
 
@@ -203,7 +204,7 @@ if __name__ == "__main__":
         "batch_size": 16,
         "nT": 10,
         "device": "cuda",
-        "window_size": 10, # Seconds
+        "window_size": 5, # Seconds
         "eval_datasets": ["PTBXL"]
     }
 
@@ -216,17 +217,17 @@ if __name__ == "__main__":
             EVAL_DATASETS=[dataset_name],
             nT=10,
         )
-        print(f"\n{dataset_name}: RMSE is {tracked_metrics['RMSE_score']}, FD is {tracked_metrics['FD']}")
+        print(f"\n{dataset_name}: RMSE is {tracked_metrics['RMSE_score']}, FD is {tracked_metrics['FD']}, MAE_HR is {tracked_metrics['MAE_HR_ECG']}")
         print("-"*1000)
 
-    for dataset_name in ["PTBXL"]:     
-        tracked_metrics = eval_diffusion_naive(
-            window_size=5,
-            EVAL_DATASETS=[dataset_name],
-            nT=10,
-        )
-        print(f"\n{dataset_name}: RMSE is {tracked_metrics['RMSE_score']}, FD is {tracked_metrics['FD']}")
-        print("-"*1000)
+    # for dataset_name in ["PTBXL"]:     
+    #     tracked_metrics = eval_diffusion_naive(
+    #         window_size=5,
+    #         EVAL_DATASETS=[dataset_name],
+    #         nT=10,
+    #     )
+    #     print(f"\n{dataset_name}: RMSE is {tracked_metrics['RMSE_score']}, FD is {tracked_metrics['FD']}, MAE_HR is {tracked_metrics['MAE_HR_ECG']}")
+    #     print("-"*1000)
 
     # TABLE 2 results
     # print("\n******* Heart Rate estimation (Table 2) results *******")

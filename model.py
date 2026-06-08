@@ -1056,7 +1056,92 @@ class ConditionNet(nn.Module):
             "down_conditions": [d1, d2, d3, d4, d5, d6],
             "up_conditions": [u1, u2, u3, u4, u5],
         }
-    
+
+
+# class ConditionNet(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.device = "cuda"
+        
+#         self.inc_c = DoubleConv(1, 64) # DoubleConv(in channel, 64)
+#         self.inc_freq = DoubleConv(32, 64)
+
+#         self.down1_c = Down(64, 128)
+#         self.down2_c = Down(128, 256)
+#         self.down3_c = Down(256, 512)
+#         self.down4_c = Down(512, 1024)
+#         self.down5_c = Down(1024, 2048 // 2)
+        
+#         self.up1_c = SegmentUp(1024, 512)
+#         self.up2_c = SegmentUp(512, 256)
+#         self.up3_c = SegmentUp(256, 128)
+#         self.up4_c = SegmentUp(128, 64)
+#         self.up5_c = SegmentUp(64, 32)
+
+#     def forward(self, x, verbose=False):
+#         """
+#         Model is U-Net with added positional encodings and self-attention layers.
+#         """
+
+#         # Level 1
+
+#         d1 = self.inc_c(x)
+#         d2 = self.down1_c(d1)
+
+#         if verbose==True:
+#             print("d2: ", d2.shape)
+        
+#         d3 = self.down2_c(d2)
+
+#         if verbose==True:
+#             print("d3: ", d3.shape)
+
+#         d4 = self.down3_c(d3)
+
+#         if verbose==True:
+#             print("d4: ", d4.shape)
+
+#         d5 = self.down4_c(d4)
+
+#         if verbose==True:
+#             print("d5: ", d5.shape)
+        
+#         d6 = self.down5_c(d5)
+
+#         if verbose==True:
+#             print("d6: ", d6.shape)
+        
+#         u1 = self.up1_c(d6)
+        
+#         if verbose==True:
+#             print("u1: ", u1.shape)
+        
+#         u2 = self.up2_c(u1)
+        
+#         if verbose==True:
+#             print("u2: ", u2.shape)
+        
+#         u3 = self.up3_c(u2)
+        
+#         if verbose==True:
+#             print("u3: ", u3.shape)
+
+#         u4 = self.up4_c(u3)
+        
+#         if verbose==True:
+#             print("u4: ", u4.shape)
+
+#         u5 = self.up5_c(u4)
+        
+#         if verbose==True:
+#             print("u5: ", u5.shape)
+
+#         return {
+#             "down_conditions": [d1, d2, d3, d4, d5, d6],
+#             "up_conditions": [u1, u2, u3, u4, u5],
+#         }
+
+
     
 class ConditionNetWithFFT(nn.Module):
     def __init__(self, device="cuda"): # device 파라미터 추가
@@ -1172,7 +1257,60 @@ class ConditionNetWithFFT(nn.Module):
             "up_conditions": [u1, u2, u3, u4, u5],
         }
         
+class NaiveDDPM(nn.Module):
+    def __init__(
+        self,
+        eps_model,
+        betas,
+        n_T,
+        criterion = nn.MSELoss(),
+    ):
+        super(NaiveDDPM, self).__init__()
+        self.eps_model = eps_model
+        self.n_T = n_T
+        self.eta = 0
+        self.beta1 = betas[0]
+        self.beta_diff = betas[1] - betas[0]
+        ## register_buffer allows us to freely access these tensors by name. It helps device placement.
+        for k, v in ddpm_schedule(self.beta1, self.beta1 + self.beta_diff, n_T).items():
+            self.register_buffer(k, v)
 
+        self.criterion = criterion
+
+    def forward(self, x=None, cond=None, mode="train", window_size=128*5):
+
+        if mode == "train":
+            
+            _ts = torch.randint(1, self.n_T, (x.shape[0],)).to(x.device) 
+
+            eps = torch.randn_like(x)
+            
+            x_t = (
+                self.sqrtab[_ts, None, None] * x
+                + self.sqrtmab[_ts, None, None] * eps
+            )  
+
+            return self.criterion(eps, self.eps_model(x_t, cond, _ts / self.n_T))
+
+        elif mode == "sample":
+
+            n_sample = cond["down_conditions"][-1].shape[0]
+            device = cond["down_conditions"][-1].device
+            
+            x_i = torch.randn(n_sample, 1, window_size).to(device)
+
+            for i in range(self.n_T, 0, -1):
+                
+                z = torch.randn(n_sample, 1, window_size).to(device) if i > 1 else 0
+
+                eps = self.eps_model(x_i, cond, torch.tensor(i / self.n_T).to(device).repeat(n_sample))
+                x_i = (
+                    self.oneover_sqrta[i] * (x_i - eps * self.mab_over_sqrtmab[i])
+                    + self.sqrt_beta_t[i] * z
+                )
+
+            return x_i
+            
 if __name__ == "__main__":
 
     device = "cuda:0"
