@@ -75,6 +75,7 @@ Lead 번호는 일반 12-lead ECG 순서를 따르는 것으로 사용합니다.
 | `std_eval.py` | `train.py`와 같은 모델 저장 규칙을 사용해 학습된 RDDM checkpoint를 로드하고 생성 성능을 평가합니다. RMSE, FD, MAE_HR_ECG, correlation coefficient, DTW, spectral similarity를 계산합니다. |
 | `std_eval.sh` | SLURM 환경에서 `std_eval.py`를 실행하기 위한 예시 submit script입니다. 경로는 현재 클러스터 예시값이므로 실행 환경에 맞게 수정해야 합니다. |
 | `data_withdiffusion.py` | 학습된 diffusion 모델로 target lead를 생성하고, Lead I와 생성 lead를 결합한 classification dataloader를 만듭니다. `only_one=True`이면 Lead I baseline만 사용합니다. |
+| `classification_eval.py` | 학습된 diffusion checkpoint로 생성 lead를 만든 뒤, 2D CNN 질환 분류 실험을 지정한 횟수만큼 반복하고 Accuracy, macro F1, ROC-AUC 결과를 CSV로 저장합니다. |
 | `RDDM_classification.ipynb` | 생성 lead를 이용한 1D CNN/2D CNN/ST-MEM 기반 질환 분류 실험 notebook입니다. 현재 실행 흐름은 주로 2D CNN 분류를 사용합니다. |
 | `RDDM_visualization.ipynb` | 학습된 모델로 생성한 ECG와 실제 target ECG, 입력 Lead I를 시각화하는 notebook입니다. |
 | `.ipynb_checkpoints/RDDM_visualization-checkpoint.ipynb` | Jupyter 자동 checkpoint입니다. 실험 실행에 직접 사용할 필요는 없습니다. |
@@ -325,7 +326,58 @@ train_loader, val_loader, test_loader = get_dataset_withdiffusion(
 
 `MODEL_PATH + str(lead_num) + "/"` 아래에 각 lead별 checkpoint가 있어야 합니다.
 
-### 8. 질환 분류 실험
+### 8. 질환 분류 반복 실험
+
+`classification_eval.py`를 사용하면 학습된 120 epoch diffusion 모델로 생성 lead를 만든 뒤, 2D CNN 분류 실험을 원하는 횟수만큼 반복하고 결과를 CSV로 저장할 수 있습니다.
+
+Baseline RDDM checkpoint를 사용하는 예시:
+
+```bash
+python classification_eval.py \
+  --data-path /tf/revision/data/ \
+  --model-base /tf/revision/model/ \
+  --input-lead 1 \
+  --target-leads 2 4 5 6 11 12 \
+  --checkpoint-epoch 120 \
+  --repeats 5 \
+  --output-csv classification_results.csv
+```
+
+FFT loss / FFT condition checkpoint를 사용하는 예시:
+
+```bash
+python classification_eval.py \
+  --data-path /tf/revision/data/ \
+  --model-base /tf/revision/model/ \
+  --input-lead 1 \
+  --target-leads 2 4 5 6 11 12 \
+  --with-fftloss \
+  --with-fftcond \
+  --checkpoint-epoch 120 \
+  --repeats 5 \
+  --output-csv classification_results_fft.csv
+```
+
+CSV에는 각 반복 run의 `test_acc`, `test_macro_f1`, `test_roc_auc`와 metric별 mean/std summary row가 함께 저장됩니다. 반복 실험은 생성된 classification dataset을 한 번 만든 뒤, seed를 바꿔 train/validation/test split과 classifier 초기화를 반복합니다.
+
+주요 실행 인자:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--data-path` | `/tf/revision/data/` | Dataset root path |
+| `--datasets` | `PTBXL` | Dataset folder names under data root |
+| `--model-base` | `/tf/revision/model/` | `train.py --model-root`와 같은 checkpoint root |
+| `--input-lead` | `1` | Condition lead number |
+| `--target-leads` | `2 4 5 6 11 12` | Generated target leads used for classification |
+| `--with-fftloss` | off | Read diffusion checkpoints from `withfftloss` |
+| `--with-fftcond` | off | Load `ConditionNetWithFFT` checkpoints |
+| `--checkpoint-epoch` | `120` | Diffusion checkpoint epoch |
+| `--repeats` | `5` | Number of repeated classification experiments |
+| `--epochs` | `50` | Max classifier training epochs per repeat |
+| `--patience` | `7` | Early stopping patience |
+| `--output-csv` | `classification_results.csv` | CSV output path |
+
+### 9. Notebook 기반 질환 분류 실험
 
 `RDDM_classification.ipynb`를 실행합니다.
 
@@ -365,8 +417,9 @@ batch size: 16
 5. `python std_eval.py --model-base ... --target-leads ...`로 RMSE, FD, MAE_HR_ECG, correlation coefficient, DTW, spectral similarity를 계산합니다.
 6. FFT condition 모델은 `python std_eval.py --model-base ... --target-leads ... --with-fftloss --with-fftcond`로 평가합니다.
 7. `RDDM_visualization.ipynb`로 생성 파형을 확인합니다.
-8. `data_withdiffusion.py`로 Lead I baseline 또는 Lead I + generated lead dataloader를 만듭니다.
-9. `RDDM_classification.ipynb`로 2D CNN 분류 성능을 평가합니다.
+8. `classification_eval.py --repeats ... --output-csv ...`로 반복 분류 실험을 실행하고 CSV 결과를 저장합니다.
+9. 필요한 경우 `data_withdiffusion.py`로 Lead I baseline 또는 Lead I + generated lead dataloader를 직접 만듭니다.
+10. Notebook 분석이 필요하면 `RDDM_classification.ipynb`로 2D CNN 분류 성능을 확인합니다.
 
 ## Notes
 

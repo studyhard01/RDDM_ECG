@@ -3,6 +3,7 @@ torch.autograd.set_detect_anomaly(True)
 import random
 from tqdm import tqdm
 import warnings
+from pathlib import Path
 from metrics import *
 warnings.filterwarnings("ignore")
 import numpy as np
@@ -35,7 +36,9 @@ def get_datasets(
     DATA_PATH = "/tf/hsh/ECG_capstone/data/", 
     #datasets=["BIDMC", "CAPNO", "DALIA", "MIMIC-AFib", "WESAD"],
     datasets=[""],
-    window_size=10, lead_num=12
+    window_size=10,
+    lead_num=12,
+    input_lead=1
     ):
 
     ecg_train_list = []
@@ -46,14 +49,15 @@ def get_datasets(
     y_test_list = []
     
     for dataset in datasets:
-        
-        ecg_train = np.load(DATA_PATH + dataset + f"/lead{lead_num}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        ppg_train = np.load(DATA_PATH + dataset + f"/lead1_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        y_train = np.load(DATA_PATH + dataset + f"/y_train.npy", allow_pickle=True)
-        
-        ecg_test = np.load(DATA_PATH + dataset + f"/lead{lead_num}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        ppg_test = np.load(DATA_PATH + dataset + f"/lead1_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
-        y_test = np.load(DATA_PATH + dataset + f"/y_test.npy", allow_pickle=True)
+        dataset_path = Path(DATA_PATH) / dataset
+
+        ecg_train = np.load(dataset_path / f"lead{lead_num}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ppg_train = np.load(dataset_path / f"lead{input_lead}_train.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        y_train = np.load(dataset_path / "y_train.npy", allow_pickle=True)
+
+        ecg_test = np.load(dataset_path / f"lead{lead_num}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        ppg_test = np.load(dataset_path / f"lead{input_lead}_test.npy", allow_pickle=True).reshape(-1, 128*window_size)
+        y_test = np.load(dataset_path / "y_test.npy", allow_pickle=True)
 
         ecg_train_list.append(ecg_train)
         ppg_train_list.append(ppg_train)
@@ -116,28 +120,63 @@ class ECGDataset():
     def __len__(self):
         return len(self.ecg_data)
 
-def get_dataset_withdiffusion(MODEL_PATH = "/tf/hsh/ECG_capstone/ECG2ECG_FINAL/LEAD1TO", DATA_PATH = "/tf/hsh/ECG_capstone/data/", lead_num=[2], only_one = False) :
+def build_diffusion_model_path(model_base, with_fftloss, input_lead, target_lead):
+    loss_dir = "withfftloss" if with_fftloss else "none"
+    return Path(model_base) / loss_dir / f"{input_lead}to{target_lead}"
+
+
+def get_dataset_withdiffusion(
+    MODEL_PATH="/tf/hsh/ECG_capstone/ECG2ECG_FINAL/LEAD1TO",
+    DATA_PATH="/tf/hsh/ECG_capstone/data/",
+    lead_num=[2],
+    only_one=False,
+    datasets=[""],
+    model_base=None,
+    input_lead=1,
+    with_fftloss=False,
+    with_fftcond=False,
+    checkpoint_epoch=120,
+    batch_size=16,
+    num_workers=64,
+    split_seed=None,
+    return_dataset=False,
+) :
     
     set_deterministic(31)
     
     for i in range(len(lead_num)) :
-        _, dataset_test = get_datasets(DATA_PATH = DATA_PATH, datasets=[""], window_size=10, lead_num = lead_num[i])
+        _, dataset_test = get_datasets(
+            DATA_PATH=DATA_PATH,
+            datasets=datasets,
+            window_size=10,
+            lead_num=lead_num[i],
+            input_lead=input_lead
+        )
         
-        testloader = DataLoader(dataset_test, batch_size=16, shuffle=True, num_workers=64)
-        
-        dpm, Conditioning_network1, Conditioning_network2 = load_pretrained_DPM(
-                PATH=MODEL_PATH + str(lead_num[i]) + '/',
-                nT=10,
-                type="RDDMfft",
-                device="cuda")
+        testloader = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+        if not only_one:
+            if model_base is not None:
+                model_path = build_diffusion_model_path(model_base, with_fftloss, input_lead, lead_num[i])
+            else:
+                model_path = Path(MODEL_PATH + str(lead_num[i]) + '/')
+
+            model_type = "RDDMfft" if with_fftcond else "RDDM"
+
+            dpm, Conditioning_network1, Conditioning_network2 = load_pretrained_DPM(
+                    PATH=model_path,
+                    nT=10,
+                    type=model_type,
+                    device="cuda",
+                    checkpoint_epoch=checkpoint_epoch)
+
+            dpm = nn.DataParallel(dpm)
+            Conditioning_network1 = nn.DataParallel(Conditioning_network1)
+            Conditioning_network2 = nn.DataParallel(Conditioning_network2)
             
-        dpm = nn.DataParallel(dpm)
-        Conditioning_network1 = nn.DataParallel(Conditioning_network1)
-        Conditioning_network2 = nn.DataParallel(Conditioning_network2)
-        
-        dpm.eval()
-        Conditioning_network1.eval()
-        Conditioning_network2.eval()
+            dpm.eval()
+            Conditioning_network1.eval()
+            Conditioning_network2.eval()
         
         window_size = 10
         device="cuda"
@@ -151,6 +190,11 @@ def get_dataset_withdiffusion(MODEL_PATH = "/tf/hsh/ECG_capstone/ECG2ECG_FINAL/L
             for y_ecg, x_ppg, ecg_roi, y_data in tqdm(testloader):
                 x_ppg = x_ppg.float().to(device)
                 y_ecg = y_ecg.float().to(device)
+
+                if only_one:
+                    real_ppgs = np.concatenate((real_ppgs, x_ppg.reshape(-1, 128*window_size).cpu().numpy()))
+                    y_datas = np.concatenate((y_datas, y_data.argmax(dim=1).numpy()))
+                    continue
         
                 generated_windows = []
         
@@ -197,16 +241,21 @@ def get_dataset_withdiffusion(MODEL_PATH = "/tf/hsh/ECG_capstone/ECG2ECG_FINAL/L
         print('----data setting with diffusion 완료----')
     
     dataset = TensorDataset(combined_data, labels_tensor)
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
-    
-    batch_size=16
+
+    if return_dataset:
+        return dataset
+
     N = len(dataset)
     train_len = int(N * 0.6)
     val_len = int(N * 0.2)
     test_len = N - train_len - val_len
-    train_set, val_set, test_set = random_split(dataset, [train_len, val_len, test_len])
+    if split_seed is None:
+        train_set, val_set, test_set = random_split(dataset, [train_len, val_len, test_len])
+    else:
+        generator = torch.Generator().manual_seed(split_seed)
+        train_set, val_set, test_set = random_split(dataset, [train_len, val_len, test_len], generator=generator)
     
-    train_loader = DataLoader(train_set, batch_size=batch_size)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size)
     test_loader = DataLoader(test_set, batch_size=batch_size)
     
